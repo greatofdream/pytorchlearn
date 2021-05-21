@@ -23,25 +23,43 @@ args = parser.parse_args()
 
 # define you model, loss functions, hyperparameters, and optimizers
 ### Your Code Here ###
-epochs = 128
+epochs = 512
 batch_size = 32
 in_features = 28*28
 out_features = 50
 class NeuralNetwork(nn.Module):
     def __init__(self):
         super(NeuralNetwork, self).__init__()
-        self.conv1 = nn.Conv2d(1,6,5)
-        self.conv2 = nn.Conv2d(6,16,5)
-        self.fc1 = nn.Linear(16*4*4, 120)
-        self.fc2 = nn.Linear(120,84)
-        self.fc3 = nn.Linear(84,out_features)
+        self.conv1 = nn.Conv2d(1,32,3)
+        self.conv2 = nn.Conv2d(32,32,3)
+        self.conv3 = nn.Conv2d(32,32,3)
+        self.conv4 = nn.Conv2d(32,64,3)
+        self.conv5 = nn.Conv2d(64,64,3)
+        
+        self.bn1 = nn.BatchNorm2d(32)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.bn3 = nn.BatchNorm2d(32)
+        self.bn4 = nn.BatchNorm2d(64)
+        self.bn5 = nn.BatchNorm1d(512)
+        self.bn6 = nn.BatchNorm2d(64)
+        
+        self.fc1 = nn.Linear(64*4*4, 512)
+        self.fc3 = nn.Linear(512, 128)
+        self.fc2 = nn.Linear(512,out_features)
+        
+        self.dropout = nn.Dropout(p=0.5)
     def forward(self, x):
-        x = F.max_pool2d(F.relu(self.conv1(x)),(2,2))# (28-5+1)/2=12
-        x = F.max_pool2d(F.relu(self.conv2(x)),2)# (14-5+1)/2=4
+        x = F.relu(self.bn1(self.conv1(x)))# (28-3+1)=26
+        x = F.max_pool2d(F.relu(self.bn2(self.conv2(x))),(2,2))# (26-3+1)/2=12
+        x = F.relu(self.bn3(self.conv3(x)))# (12-3+1)=10
+        x = F.max_pool2d(F.relu(self.bn4(self.conv4(x))),(2,2))# (10-3+1)/2=4
+        #x = F.max_pool2d(self.bn4(x),(2,2))#(10/2=5)
+        #x = F.relu(self.bn6(self.conv5(x)))# (4-3+1)=2
         x = torch.flatten(x,1)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
+        x = self.dropout(F.relu(self.bn5(self.fc1(x))))
+        #x = F.relu(self.fc3(x))
+        x = self.fc2(x)
+        #return F.softmax(x)
         return x
 model = NeuralNetwork().to(device)
 print(model)
@@ -60,12 +78,15 @@ test_loader = Data.DataLoader(dataset=test_dataset,batch_size=batch_size)
 
 print(train_image.shape,train_label.shape)
 # note: you should use train_image, train_label for training, apply the model to test_image to get predictions and use test_label to evaluate the predictions 
-learning_rate = 0.01
+learning_rate = 0.005
 momentum = 0.9
-optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)#,weight_decay=0.001)
+
 #criterion = nn.MSELoss()
 criterion = nn.CrossEntropyLoss()
 # train model using train_image and train_label
+maxAccuracy = 0
+maxEpoch = 0
 for epoch in range(epochs):
     model.train()
     size = len(train_loader.dataset)
@@ -85,7 +106,7 @@ for epoch in range(epochs):
             print(f'loss: {loss:>7f} [{current:>5d}/{size:>5d}]')
 
 # get predictions on test_image
-    '''
+    
     model.eval()
     size = len(test_loader.dataset)
     test_loss, correct = 0,0
@@ -98,8 +119,11 @@ for epoch in range(epochs):
             correct += (pred.argmax(1) ==y).type(torch.float).sum().item()
     test_loss /= size
     correct /= size
+    if correct>maxAccuracy:
+        maxAccuracy = correct
+        maxEpoch = epoch
     print(f'Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss:{test_loss:>8f} \n')
-    '''
+    
 # evaluation
 model.eval()
 with torch.no_grad():
@@ -107,6 +131,7 @@ with torch.no_grad():
     pred = model(x_test)
     pred = np.argmax(pred.cpu().numpy(),axis=1)
 print("Test Accuracy:", np.mean(1.0 * (pred == test_label)))
+print('maxAccuracy:{},maxEpoch:{}'.format(maxAccuracy,maxEpoch))
 # note that you should not use test_label elsewhere
 
 
