@@ -180,6 +180,9 @@ user_id=1的购买历程
 
 train数据集和test数据集中的user_id互不重合，因此需要依赖train用户购买记录进行分类，并将test中的用户映射进前面的分类。
 
++ 对于`product_id`，train数据集[3752,5892800], test数据集[3762,5892678]
++ train内包含32734个id,test包含2691个id。
++ test的`product_id`不是train的子集
 ## XGBoost
 先对用户特征手动提取，之后在XGBoost里分类，训练不出来，而且手动提取特征损失了信息。
 
@@ -192,11 +195,61 @@ train数据集和test数据集中的user_id互不重合，因此需要依赖trai
 + 直接选择最后一次的商品 0.236 / 183
 
 选择出现次数最多的商品没有考虑删除购物车的操作，需要正向处理
-+ 将cart=5,remove_from_cart=-5, purchase=-10,view=1
++ 将cart=5, purchase=-10,remove_from_cart=-5,view=1
 + 选择加权值最大，且最后一次操作，次数最多的商品 0.269 / 147
 
 尝试提高view的权重至2，并没有明显变化
 ### 监督学习-权重法
 
-将权重在训练集里学习，然后再预测
+将权重在训练集里学习，然后再预测,可以
++ 直接使用全连接层，将物品构造成矩阵
+    - 仅用一层全连接层，结果为 0.2276 ，还不如直接返回最后一次的商品
+      检查了使用的训练集，分布不均衡，绝大部分集中在第一个，主要因为有相当一部分人只购买了一两件商品,数据集位于train1.h5里 itemTrain1.csv
+    - 重新筛选数据集，选取记录数量大于10个的人
+      使用多层两层0.254
+      ```
+      def __init__(self, nfeature, out):
+        super(Net, self).__init__()
+        self.hidden = torch.nn.Linear(nfeature,nfeature*4)
+        self.fc = torch.nn.Linear(nfeature*4,out)
+      def forward(self, x):
+        x = F.relu(self.hidden(x))
+        x = self.fc(x)
+      ```
+   - 使用一层全连接层，然后拟合权重,但是拟合结果对purchase给的权重不如直觉给的好，而且view给的过高 0.233
+     (0.8829, -0.6110, -0.3465,  0.9665)
+   - 使用三层全连接层 0.258
+   - 使用四层全连接层 0.262
+     ```
+     def __init__(self, nfeature, out):
+        super(Net, self).__init__()
+        self.hidden = torch.nn.Linear(nfeature,nfeature*4)
+        self.fc2 = torch.nn.Linear(nfeature*4,nfeature*4)
+        self.fc3 = torch.nn.Linear(nfeature*4,nfeature*4)
+        self.fc = torch.nn.Linear(nfeature*4,out)
+        self.conv1 = torch.nn.Conv1d(1,1,(1,3),padding=(0,1))
+        self.fc4 = torch.nn.Linear(nfeature*8,nfeature*4)
+    def forward(self, x):
+        x = F.relu(self.hidden(x))
+        #print(x.shape)
+        x = F.relu(self.fc2(x))
+        #print(x.shape)
+        x = F.relu(self.fc3(x))
+        #print(x.shape)
+        x = F.relu(self.fc4(x))
+        x = self.fc(x)
+        #x = self.hidden(x)
+        return x
+     ```
+   - 再丢进去卷积，池化，正则层
+   
+### 监督学习，使用
 
++ 使用LSTM考虑时序
+    - 矩阵输入最近200条数据，商品默认小于100个，超出置零，输入矩阵(T=200,producti-dimension=100)，在对应product处以四位存储操作
+      结果非常差，训练时不收敛，loss不下降，而且非常占内存 0.2025
+
+### 引入商品特征
+将训练集和测试集集中在一起，统计product_id对应的view,cart,remove_cart,purchase的比例
++ cart/view,purchase/cart,purchase/view 0.263
++ cart,view,purchase,remove_cart 0.259
